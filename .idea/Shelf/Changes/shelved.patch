@@ -1,0 +1,996 @@
+Index: src/assets/MusicPlayer.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/assets/MusicPlayer.java b/src/assets/MusicPlayer.java
+new file mode 100644
+--- /dev/null	(date 1727814294720)
++++ b/src/assets/MusicPlayer.java	(date 1727814294720)
+@@ -0,0 +1,350 @@
++import javazoom.jl.player.advanced.AdvancedPlayer;
++import javazoom.jl.player.advanced.PlaybackEvent;
++import javazoom.jl.player.advanced.PlaybackListener;
++
++import java.io.*;
++import java.util.ArrayList;
++
++public class MusicPlayer extends PlaybackListener {
++    // this will be used to update isPaused more synchronously
++    private static final Object playSignal = new Object();
++
++    // need reference so that we can update the gui in this class
++    private MusicPlayerGUI musicPlayerGUI;
++
++    // we will need a way to store our song's details, so we will be creating a song class
++    private Song currentSong;
++    public Song getCurrentSong(){
++        return currentSong;
++    }
++
++    private ArrayList<Song> playlist;
++
++    // we will need to keep track the index we are in the playlist
++    private int currentPlaylistIndex;
++
++    // use JLayer library to create an AdvancedPlayer obj which will handle playing the music
++    private AdvancedPlayer advancedPlayer;
++
++    // pause boolean flag used to indicate whether the player has been paused
++    private boolean isPaused;
++
++    // boolean flag used to tell when the song has finished
++    private boolean songFinished;
++
++    private boolean pressedNext, pressedPrev;
++
++    // stores in teh last frame when the playback is finished (used for pausing and resuming)
++    private int currentFrame;
++    public void setCurrentFrame(int frame){
++        currentFrame = frame;
++    }
++
++    // track how many milliseconds has passed since playing the song (used for updating the slider)
++    private int currentTimeInMilli;
++    public void setCurrentTimeInMilli(int timeInMilli){
++        currentTimeInMilli = timeInMilli;
++    }
++
++    // constructor
++    public MusicPlayer(MusicPlayerGUI musicPlayerGUI){
++        this.musicPlayerGUI = musicPlayerGUI;
++    }
++
++    public void loadSong(Song song){
++        currentSong = song;
++        playlist = null;
++
++        // stop the song if possible
++        if(!songFinished)
++            stopSong();
++
++        // play the current song if not null
++        if(currentSong != null){
++            // reset frame
++            currentFrame = 0;
++
++            // reset current time in milli
++            currentTimeInMilli = 0;
++
++            // update gui
++            musicPlayerGUI.setPlaybackSliderValue(0);
++
++            playCurrentSong();
++        }
++    }
++
++    public void loadPlaylist(File playlistFile){
++        playlist = new ArrayList<>();
++
++        // store the paths from the text file into the playlist array list
++        try{
++            FileReader fileReader = new FileReader(playlistFile);
++            BufferedReader bufferedReader = new BufferedReader(fileReader);
++
++            // reach each line from the text file and store the text into the songPath variable
++            String songPath;
++            while((songPath = bufferedReader.readLine()) != null){
++                // create song object based on song path
++                Song song = new Song(songPath);
++
++                // add to playlist array list
++                playlist.add(song);
++            }
++        }catch(Exception e){
++            e.printStackTrace();
++        }
++
++        if(playlist.size() > 0){
++            // reset playback slider
++            musicPlayerGUI.setPlaybackSliderValue(0);
++            currentTimeInMilli = 0;
++
++            // update current song to the first song in the playlist
++            currentSong = playlist.get(0);
++
++            // start from the beginning frame
++            currentFrame = 0;
++
++            // update gui
++            musicPlayerGUI.enablePauseButtonDisablePlayButton();
++            musicPlayerGUI.updateSongTitleAndArtist(currentSong);
++            musicPlayerGUI.updatePlaybackSlider(currentSong);
++
++            // start song
++            playCurrentSong();
++        }
++    }
++
++    public void pauseSong(){
++        if(advancedPlayer != null){
++            // update isPaused flag
++            isPaused = true;
++
++            // then we want to stop the player
++            stopSong();
++        }
++    }
++
++    public void stopSong(){
++        if(advancedPlayer != null){
++            advancedPlayer.stop();
++            advancedPlayer.close();
++            advancedPlayer = null;
++        }
++    }
++
++    public void nextSong(){
++        // no need to go to the next song if there is no playlist
++        if(playlist == null) return;
++
++        // check to see if we have reached the end of the playlist, if so then don't do anything
++        if(currentPlaylistIndex + 1 > playlist.size() - 1) return;
++
++        pressedNext = true;
++
++        // stop the song if possible
++        if(!songFinished)
++            stopSong();
++
++        // increase current playlist index
++        currentPlaylistIndex++;
++
++        // update current song
++        currentSong = playlist.get(currentPlaylistIndex);
++
++        // reset frame
++        currentFrame = 0;
++
++        // reset current time in milli
++        currentTimeInMilli = 0;
++
++        // update gui
++        musicPlayerGUI.enablePauseButtonDisablePlayButton();
++        musicPlayerGUI.updateSongTitleAndArtist(currentSong);
++        musicPlayerGUI.updatePlaybackSlider(currentSong);
++
++        // play the song
++        playCurrentSong();
++    }
++
++    public void prevSong(){
++        // no need to go to the next song if there is no playlist
++        if(playlist == null) return;
++
++        // check to see if we can go to the previous song
++        if(currentPlaylistIndex - 1 < 0) return;
++
++        pressedPrev = true;
++
++        // stop the song if possible
++        if(!songFinished)
++            stopSong();
++
++        // decrease current playlist index
++        currentPlaylistIndex--;
++
++        // update current song
++        currentSong = playlist.get(currentPlaylistIndex);
++
++        // reset frame
++        currentFrame = 0;
++
++        // reset current time in milli
++        currentTimeInMilli = 0;
++
++        // update gui
++        musicPlayerGUI.enablePauseButtonDisablePlayButton();
++        musicPlayerGUI.updateSongTitleAndArtist(currentSong);
++        musicPlayerGUI.updatePlaybackSlider(currentSong);
++
++        // play the song
++        playCurrentSong();
++    }
++
++    public void playCurrentSong(){
++        if(currentSong == null) return;
++
++        try{
++            // read mp3 audio data
++            FileInputStream fileInputStream = new FileInputStream(currentSong.getFilePath());
++            BufferedInputStream bufferedInputStream = new BufferedInputStream(fileInputStream);
++
++            // create a new advanced player
++            advancedPlayer = new AdvancedPlayer(bufferedInputStream);
++            advancedPlayer.setPlayBackListener(this);
++
++            // start music
++            startMusicThread();
++
++            // start playback slider thread
++            startPlaybackSliderThread();
++
++        }catch(Exception e){
++            e.printStackTrace();
++        }
++    }
++
++    // create a thread that will handle playing the music
++    private void startMusicThread(){
++        new Thread(new Runnable() {
++            @Override
++            public void run() {
++                try{
++                    if(isPaused){
++                        synchronized(playSignal){
++                            // update flag
++                            isPaused = false;
++
++                            // notify the other thread to continue (makes sure that isPaused is updated to false properly)
++                            playSignal.notify();
++                        }
++
++                        // resume music from last frame
++                        advancedPlayer.play(currentFrame, Integer.MAX_VALUE);
++                    }else{
++                        // play music from the beginning
++                        advancedPlayer.play();
++                    }
++                }catch(Exception e){
++                    e.printStackTrace();
++                }
++            }
++        }).start();
++    }
++
++    // create a thread that will handle updating the slider
++    private void startPlaybackSliderThread(){
++        new Thread(new Runnable() {
++            @Override
++            public void run() {
++                if(isPaused){
++                    try{
++                        // wait till it gets notified by other thread to continue
++                        // makes sure that isPaused boolean flag updates to false before continuing
++                        synchronized(playSignal){
++                            playSignal.wait();
++                        }
++                    }catch(Exception e){
++                        e.printStackTrace();
++                    }
++                }
++
++                while(!isPaused && !songFinished && !pressedNext && !pressedPrev){
++                    try{
++                        // increment current time milli
++                        currentTimeInMilli++;
++
++                        // calculate into frame value
++                        int calculatedFrame = (int) ((double) currentTimeInMilli * 2.08 * currentSong.getFrameRatePerMilliseconds());
++
++                        // update gui
++                        musicPlayerGUI.setPlaybackSliderValue(calculatedFrame);
++
++                        // mimic 1 millisecond using thread.sleep
++                        Thread.sleep(1);
++                    }catch(Exception e){
++                        e.printStackTrace();
++                    }
++                }
++            }
++        }).start();
++    }
++
++    @Override
++    public void playbackStarted(PlaybackEvent evt) {
++        // this method gets called in the beginning of the song
++        System.out.println("Playback Started");
++        songFinished = false;
++        pressedNext = false;
++        pressedPrev = false;
++    }
++
++    @Override
++    public void playbackFinished(PlaybackEvent evt) {
++        // this method gets called when the song finishes or if the player gets closed
++        System.out.println("Playback Finished");
++        if(isPaused){
++            currentFrame += (int) ((double) evt.getFrame() * currentSong.getFrameRatePerMilliseconds());
++        }else{
++            // if the user pressed next or prev we don't need to execute the rest of the code
++            if(pressedNext || pressedPrev) return;
++
++            // when the song ends
++            songFinished = true;
++
++            if(playlist == null){
++                // update gui
++                musicPlayerGUI.enablePlayButtonDisablePauseButton();
++            }else{
++                // last song in the playlist
++                if(currentPlaylistIndex == playlist.size() - 1){
++                    // update gui
++                    musicPlayerGUI.enablePlayButtonDisablePauseButton();
++                }else{
++                    // go to the next song in the playlist
++                    nextSong();
++                }
++            }
++        }
++    }
++}
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
+Index: src/assets/App.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/assets/App.java b/src/assets/App.java
+new file mode 100644
+--- /dev/null	(date 1727813282924)
++++ b/src/assets/App.java	(date 1727813282924)
+@@ -0,0 +1,16 @@
++import javax.swing.*;
++
++public class App {
++    public static void main(String[] args) {
++        SwingUtilities.invokeLater(new Runnable(){
++            @Override
++            public void run(){
++                new MusicPlayerGUI().setVisible(true);
++
++//                Song song = new Song("src/assets/Wind Riders - Asher Fulero.mp3");
++//                System.out.println(song.getSongTitle());
++//                System.out.println(song.getSongArtist());
++            }
++        });
++    }
++}
+\ No newline at end of file
+Index: src/assets/Song.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/assets/Song.java b/src/assets/Song.java
+new file mode 100644
+--- /dev/null	(date 1727814270737)
++++ b/src/assets/Song.java	(date 1727814270737)
+@@ -0,0 +1,85 @@
++import com.mpatric.mp3agic.Mp3File;
++import org.jaudiotagger.audio.AudioFile;
++import org.jaudiotagger.audio.AudioFileIO;
++import org.jaudiotagger.tag.FieldKey;
++import org.jaudiotagger.tag.Tag;
++
++import java.io.File;
++
++// class used to describe a song
++public class Song {
++    private String songTitle;
++    private String songArtist;
++    private String songLength;
++    private String filePath;
++    private Mp3File mp3File;
++    private double frameRatePerMilliseconds;
++
++    public Song(String filePath){
++        this.filePath = filePath;
++        try{
++            mp3File = new Mp3File(filePath);
++            frameRatePerMilliseconds = (double) mp3File.getFrameCount() / mp3File.getLengthInMilliseconds();
++            songLength = convertToSongLengthFormat();
++
++            // use the jaudiotagger library to create an audiofile obj to read mp3 file's information
++            AudioFile audioFile = AudioFileIO.read(new File(filePath));
++
++            // read through the meta data of the audio file
++            Tag tag =  audioFile.getTag();
++            if(tag != null){
++                songTitle = tag.getFirst(FieldKey.TITLE);
++                songArtist = tag.getFirst(FieldKey.ARTIST);
++            }else{
++                // could not read through mp3 file's meta data
++                songTitle = "N/A";
++                songArtist = "N/A";
++            }
++        }catch(Exception e){
++            e.printStackTrace();
++        }
++    }
++
++    private String convertToSongLengthFormat(){
++        long minutes = mp3File.getLengthInSeconds() / 60;
++        long seconds = mp3File.getLengthInSeconds() % 60;
++        String formattedTime = String.format("%02d:%02d", minutes, seconds);
++
++        return formattedTime;
++    }
++
++    // getters
++    public String getSongTitle() {
++        return songTitle;
++    }
++
++    public String getSongArtist() {
++        return songArtist;
++    }
++
++    public String getSongLength() {
++        return songLength;
++    }
++
++    public String getFilePath() {
++        return filePath;
++    }
++
++    public Mp3File getMp3File(){return mp3File;}
++    public double getFrameRatePerMilliseconds(){return frameRatePerMilliseconds;}
++}
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
+Index: src/assets/MusicPlaylistDialog.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/assets/MusicPlaylistDialog.java b/src/assets/MusicPlaylistDialog.java
+new file mode 100644
+--- /dev/null	(date 1727814411855)
++++ b/src/assets/MusicPlaylistDialog.java	(date 1727814411855)
+@@ -0,0 +1,129 @@
++import javax.swing.*;
++import javax.swing.filechooser.FileNameExtensionFilter;
++import java.awt.*;
++import java.awt.event.ActionEvent;
++import java.awt.event.ActionListener;
++import java.io.BufferedWriter;
++import java.io.File;
++import java.io.FileWriter;
++import java.util.ArrayList;
++
++public class MusicPlaylistDialog extends JDialog {
++    private MusicPlayerGUI musicPlayerGUI;
++
++    // store all of the paths to be written to a txt file (when we load a playlist)
++    private ArrayList<String> songPaths;
++
++    public MusicPlaylistDialog(MusicPlayerGUI musicPlayerGUI){
++        this.musicPlayerGUI = musicPlayerGUI;
++        songPaths = new ArrayList<>();
++
++        // configure dialog
++        setTitle("Create Playlist");
++        setSize(400, 400);
++        setResizable(false);
++        getContentPane().setBackground(MusicPlayerGUI.FRAME_COLOR);
++        setLayout(null);
++        setModal(true); // this property makes it so that the dialog has to be closed to give focus
++        setLocationRelativeTo(musicPlayerGUI);
++
++        addDialogComponents();
++    }
++
++    private void addDialogComponents(){
++        // container to hold each song path
++        JPanel songContainer = new JPanel();
++        songContainer.setLayout(new BoxLayout(songContainer, BoxLayout.Y_AXIS));
++        songContainer.setBounds((int)(getWidth() * 0.025), 10, (int)(getWidth() * 0.90), (int) (getHeight() * 0.75));
++        add(songContainer);
++
++        // add song button
++        JButton addSongButton = new JButton("Add");
++        addSongButton.setBounds(60, (int) (getHeight() * 0.80), 100, 25);
++        addSongButton.setFont(new Font("Dialog", Font.BOLD, 14));
++        addSongButton.addActionListener(new ActionListener() {
++            @Override
++            public void actionPerformed(ActionEvent e) {
++                // open file explorer
++                JFileChooser jFileChooser = new JFileChooser();
++                jFileChooser.setFileFilter(new FileNameExtensionFilter("MP3", "mp3"));
++                jFileChooser.setCurrentDirectory(new File("src/assets"));
++                int result = jFileChooser.showOpenDialog(MusicPlaylistDialog.this);
++
++                File selectedFile = jFileChooser.getSelectedFile();
++                if(result == JFileChooser.APPROVE_OPTION && selectedFile != null){
++                    JLabel filePathLabel = new JLabel(selectedFile.getPath());
++                    filePathLabel.setFont(new Font("Dialog", Font.BOLD, 12));
++                    filePathLabel.setBorder(BorderFactory.createLineBorder(Color.BLACK));
++
++                    // add to the list
++                    songPaths.add(filePathLabel.getText());
++
++                    // add to container
++                    songContainer.add(filePathLabel);
++
++                    // refreshes dialog to show newly added JLabel
++                    songContainer.revalidate();
++                }
++            }
++        });
++        add(addSongButton);
++
++        // save playlist button
++        JButton savePlaylistButton = new JButton("Save");
++        savePlaylistButton.setBounds(215, (int) (getHeight() * 0.80), 100, 25);
++        savePlaylistButton.setFont(new Font("Dialog", Font.BOLD, 14));
++        savePlaylistButton.addActionListener(new ActionListener() {
++            @Override
++            public void actionPerformed(ActionEvent e) {
++                try{
++                    JFileChooser jFileChooser = new JFileChooser();
++                    jFileChooser.setCurrentDirectory(new File("src/assets"));
++                    int result = jFileChooser.showSaveDialog(MusicPlaylistDialog.this);
++
++                    if(result == JFileChooser.APPROVE_OPTION){
++                        // we use getSelectedFile() to get reference to the file that we are about to save
++                        File selectedFile = jFileChooser.getSelectedFile();
++
++                        // convert to .txt file if not done so already
++                        // this will check to see if the file does not have the ".txt" file extension
++                        if(!selectedFile.getName().substring(selectedFile.getName().length() - 4).equalsIgnoreCase(".txt")){
++                            selectedFile = new File(selectedFile.getAbsoluteFile() + ".txt");
++                        }
++
++                        // create the new file at the destinated directory
++                        selectedFile.createNewFile();
++
++                        // now we will write all of the song paths into this file
++                        FileWriter fileWriter = new FileWriter(selectedFile);
++                        BufferedWriter bufferedWriter = new BufferedWriter(fileWriter);
++
++                        // iterate through our song paths list and write each string into the file
++                        // each song will be written in their own row
++                        for(String songPath : songPaths){
++                            bufferedWriter.write(songPath + "\n");
++                        }
++                        bufferedWriter.close();
++
++                        // display success dialog
++                        JOptionPane.showMessageDialog(MusicPlaylistDialog.this, "Successfully Created Playlist!");
++
++                        // close this dialog
++                        MusicPlaylistDialog.this.dispose();
++                    }
++                }catch(Exception exception){
++                    exception.printStackTrace();
++                }
++            }
++        });
++        add(savePlaylistButton);
++    }
++}
++
++
++
++
++
++
++
++
+Index: src/assets/MusicPlayerGUI.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.BaseRevisionTextPatchEP
+<+>package assets;\r\n\r\npublic class MusicPlayerGUI {\r\n}\r\n
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/assets/MusicPlayerGUI.java b/src/assets/MusicPlayerGUI.java
+--- a/src/assets/MusicPlayerGUI.java	(revision 51e4f90816c6f93d6e3141354726ec5820055619)
++++ b/src/assets/MusicPlayerGUI.java	(date 1727814331459)
+@@ -1,4 +1,361 @@
+-package assets;
++import javax.imageio.ImageIO;
++import javax.swing.*;
++import javax.swing.filechooser.FileNameExtensionFilter;
++import java.awt.*;
++import java.awt.event.ActionEvent;
++import java.awt.event.ActionListener;
++import java.awt.event.MouseAdapter;
++import java.awt.event.MouseEvent;
++import java.awt.image.BufferedImage;
++import java.io.File;
++import java.util.Hashtable;
++
++public class MusicPlayerGUI extends JFrame {
++    // color configurations
++    public static final Color FRAME_COLOR = Color.BLACK;
++    public static final Color TEXT_COLOR = Color.WHITE;
++
++    private MusicPlayer musicPlayer;
++
++    // allow us to use file explorer in our app
++    private JFileChooser jFileChooser;
++
++    private JLabel songTitle, songArtist;
++    private JPanel playbackBtns;
++    private JSlider playbackSlider;
++
++    public MusicPlayerGUI(){
++        // calls JFrame constructor to configure out gui and set the title heaader to "Music Player"
++        super("Music Player");
++
++        // set the width and height
++        setSize(400, 600);
++
++        // end process when app is closed
++        setDefaultCloseOperation(EXIT_ON_CLOSE);
++
++        // launch the app at the center of the screen
++        setLocationRelativeTo(null);
++
++        // prevent the app from being resized
++        setResizable(false);
++
++        // set layout to null which allows us to control the (x, y) coordinates of our components
++        // and also set the height and width
++        setLayout(null);
++
++        // change the frame color
++        getContentPane().setBackground(FRAME_COLOR);
++
++        musicPlayer = new MusicPlayer(this);
++        jFileChooser = new JFileChooser();
++
++        // set a default path for file explorer
++        jFileChooser.setCurrentDirectory(new File("src/assets"));
++
++        // filter file chooser to only see .mp3 files
++        jFileChooser.setFileFilter(new FileNameExtensionFilter("MP3", "mp3"));
++
++        addGuiComponents();
++    }
++
++    private void addGuiComponents(){
++        // add toolbar
++        addToolbar();
++
++        // load record image
++        JLabel songImage = new JLabel(loadImage("src/assets/record.png"));
++        songImage.setBounds(0, 50, getWidth() - 20, 225);
++        add(songImage);
++
++        // song title
++        songTitle = new JLabel("Song Title");
++        songTitle.setBounds(0, 285, getWidth() - 10, 30);
++        songTitle.setFont(new Font("Dialog", Font.BOLD, 24));
++        songTitle.setForeground(TEXT_COLOR);
++        songTitle.setHorizontalAlignment(SwingConstants.CENTER);
++        add(songTitle);
++
++        // song artist
++        songArtist = new JLabel("Artist");
++        songArtist.setBounds(0, 315, getWidth() - 10, 30);
++        songArtist.setFont(new Font("Dialog", Font.PLAIN, 24));
++        songArtist.setForeground(TEXT_COLOR);
++        songArtist.setHorizontalAlignment(SwingConstants.CENTER);
++        add(songArtist);
++
++        // playback slider
++        playbackSlider = new JSlider(JSlider.HORIZONTAL, 0, 100, 0);
++        playbackSlider.setBounds(getWidth()/2 - 300/2, 365, 300, 40);
++        playbackSlider.setBackground(null);
++        playbackSlider.addMouseListener(new MouseAdapter() {
++            @Override
++            public void mousePressed(MouseEvent e) {
++                // when the user is holding the tick we want to the pause the song
++                musicPlayer.pauseSong();
++            }
++
++            @Override
++            public void mouseReleased(MouseEvent e) {
++                // when the user drops the tick
++                JSlider source = (JSlider) e.getSource();
++
++                // get the frame value from where the user wants to playback to
++                int frame = source.getValue();
++
++                // update the current frame in the music player to this frame
++                musicPlayer.setCurrentFrame(frame);
++
++                // update current time in milli as well
++                musicPlayer.setCurrentTimeInMilli((int) (frame / (2.08 * musicPlayer.getCurrentSong().getFrameRatePerMilliseconds())));
++
++                // resume the song
++                musicPlayer.playCurrentSong();
++
++                // toggle on pause button and toggle off play button
++                enablePauseButtonDisablePlayButton();
++            }
++        });
++        add(playbackSlider);
++
++        // playback buttons (i.e. previous, play, next)
++        addPlaybackBtns();
++    }
++
++    private void addToolbar(){
++        JToolBar toolBar = new JToolBar();
++        toolBar.setBounds(0, 0, getWidth(), 20);
++
++        // prevent toolbar from being moved
++        toolBar.setFloatable(false);
++
++        // add drop down menu
++        JMenuBar menuBar = new JMenuBar();
++        toolBar.add(menuBar);
++
++        // now we will add a song menu where we will place the loading song option
++        JMenu songMenu = new JMenu("Song");
++        menuBar.add(songMenu);
++
++        // add the "load song" item in the songMenu
++        JMenuItem loadSong = new JMenuItem("Load Song");
++        loadSong.addActionListener(new ActionListener() {
++            @Override
++            public void actionPerformed(ActionEvent e) {
++                // an integer is returned to us to let us know what the user did
++                int result = jFileChooser.showOpenDialog(MusicPlayerGUI.this);
++                File selectedFile = jFileChooser.getSelectedFile();
++
++                // this means that we are also checking to see if the user pressed the "open" button
++                if(result == JFileChooser.APPROVE_OPTION && selectedFile != null){
++                    // create a song obj based on selected file
++                    Song song = new Song(selectedFile.getPath());
++
++                    // load song in music player
++                    musicPlayer.loadSong(song);
++
++                    // update song title and artist
++                    updateSongTitleAndArtist(song);
++
++                    // update playback slider
++                    updatePlaybackSlider(song);
++
++                    // toggle on pause button and toggle off play button
++                    enablePauseButtonDisablePlayButton();
++                }
++            }
++        });
++        songMenu.add(loadSong);
++
++        // now we will add the playlist menu
++        JMenu playlistMenu = new JMenu("Playlist");
++        menuBar.add(playlistMenu);
++
++        // then add the items to the playlist menu
++        JMenuItem createPlaylist = new JMenuItem("Create Playlist");
++        createPlaylist.addActionListener(new ActionListener() {
++            @Override
++            public void actionPerformed(ActionEvent e) {
++                // load music playlist dialog
++                new MusicPlaylistDialog(MusicPlayerGUI.this).setVisible(true);
++            }
++        });
++        playlistMenu.add(createPlaylist);
++
++        JMenuItem loadPlaylist = new JMenuItem("Load Playlist");
++        loadPlaylist.addActionListener(new ActionListener() {
++            @Override
++            public void actionPerformed(ActionEvent e) {
++                JFileChooser jFileChooser = new JFileChooser();
++                jFileChooser.setFileFilter(new FileNameExtensionFilter("Playlist", "txt"));
++                jFileChooser.setCurrentDirectory(new File("src/assets"));
++
++                int result = jFileChooser.showOpenDialog(MusicPlayerGUI.this);
++                File selectedFile = jFileChooser.getSelectedFile();
++
++                if(result == JFileChooser.APPROVE_OPTION && selectedFile != null){
++                    // stop the music
++                    musicPlayer.stopSong();
++
++                    // load playlist
++                    musicPlayer.loadPlaylist(selectedFile);
++                }
++            }
++        });
++        playlistMenu.add(loadPlaylist);
+ 
+-public class MusicPlayerGUI {
+-}
++        add(toolBar);
++    }
++
++    private void addPlaybackBtns(){
++        playbackBtns = new JPanel();
++        playbackBtns.setBounds(0, 435, getWidth() - 10, 80);
++        playbackBtns.setBackground(null);
++
++        // previous button
++        JButton prevButton = new JButton(loadImage("src/assets/previous.png"));
++        prevButton.setBorderPainted(false);
++        prevButton.setBackground(null);
++        prevButton.addActionListener(new ActionListener() {
++            @Override
++            public void actionPerformed(ActionEvent e) {
++                // go to the previous song
++                musicPlayer.prevSong();
++            }
++        });
++        playbackBtns.add(prevButton);
++
++        // play button
++        JButton playButton = new JButton(loadImage("src/assets/play.png"));
++        playButton.setBorderPainted(false);
++        playButton.setBackground(null);
++        playButton.addActionListener(new ActionListener() {
++            @Override
++            public void actionPerformed(ActionEvent e) {
++                // toggle off play button and toggle on pause button
++                enablePauseButtonDisablePlayButton();
++
++                // play or resume song
++                musicPlayer.playCurrentSong();
++            }
++        });
++        playbackBtns.add(playButton);
++
++        // pause button
++        JButton pauseButton = new JButton(loadImage("src/assets/pause.png"));
++        pauseButton.setBorderPainted(false);
++        pauseButton.setBackground(null);
++        pauseButton.setVisible(false);
++        pauseButton.addActionListener(new ActionListener() {
++            @Override
++            public void actionPerformed(ActionEvent e) {
++                // toggle off pause button and toggle on play button
++                enablePlayButtonDisablePauseButton();
++
++                // pause the song
++                musicPlayer.pauseSong();
++            }
++        });
++        playbackBtns.add(pauseButton);
++
++        // next button
++        JButton nextButton = new JButton(loadImage("src/assets/next.png"));
++        nextButton.setBorderPainted(false);
++        nextButton.setBackground(null);
++        nextButton.addActionListener(new ActionListener() {
++            @Override
++            public void actionPerformed(ActionEvent e) {
++                // go to the next song
++                musicPlayer.nextSong();
++            }
++        });
++        playbackBtns.add(nextButton);
++
++        add(playbackBtns);
++    }
++
++    // this will be used to update our slider from the music player class
++    public void setPlaybackSliderValue(int frame){
++        playbackSlider.setValue(frame);
++    }
++
++    public void updateSongTitleAndArtist(Song song){
++        songTitle.setText(song.getSongTitle());
++        songArtist.setText(song.getSongArtist());
++    }
++
++    public void updatePlaybackSlider(Song song){
++        // update max count for slider
++        playbackSlider.setMaximum(song.getMp3File().getFrameCount());
++
++        // create the song length label
++        Hashtable<Integer, JLabel> labelTable = new Hashtable<>();
++
++        // beginning will be 00:00
++        JLabel labelBeginning = new JLabel("00:00");
++        labelBeginning.setFont(new Font("Dialog", Font.BOLD, 18));
++        labelBeginning.setForeground(TEXT_COLOR);
++
++        // end will vary depending on the song
++        JLabel labelEnd =  new JLabel(song.getSongLength());
++        labelEnd.setFont(new Font("Dialog", Font.BOLD, 18));
++        labelEnd.setForeground(TEXT_COLOR);
++
++        labelTable.put(0, labelBeginning);
++        labelTable.put(song.getMp3File().getFrameCount(), labelEnd);
++
++        playbackSlider.setLabelTable(labelTable);
++        playbackSlider.setPaintLabels(true);
++    }
++
++    public void enablePauseButtonDisablePlayButton(){
++        // retrieve reference to play button from playbackBtns panel
++        JButton playButton = (JButton) playbackBtns.getComponent(1);
++        JButton pauseButton = (JButton) playbackBtns.getComponent(2);
++
++        // turn off play button
++        playButton.setVisible(false);
++        playButton.setEnabled(false);
++
++        // turn on pause button
++        pauseButton.setVisible(true);
++        pauseButton.setEnabled(true);
++    }
++
++    public void enablePlayButtonDisablePauseButton(){
++        // retrieve reference to play button from playbackBtns panel
++        JButton playButton = (JButton) playbackBtns.getComponent(1);
++        JButton pauseButton = (JButton) playbackBtns.getComponent(2);
++
++        // turn on play button
++        playButton.setVisible(true);
++        playButton.setEnabled(true);
++
++        // turn off pause button
++        pauseButton.setVisible(false);
++        pauseButton.setEnabled(false);
++    }
++
++    private ImageIcon loadImage(String imagePath){
++        try{
++            // read the image file from the given path
++            BufferedImage image = ImageIO.read(new File(imagePath));
++
++            // returns an image icon so that our component can render the image
++            return new ImageIcon(image);
++        }catch(Exception e){
++            e.printStackTrace();
++        }
++
++        // could not find resource
++        return null;
++    }
++}
++
++
++
++
++
++
++
++
