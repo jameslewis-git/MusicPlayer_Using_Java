@@ -1,0 +1,12 @@
+D:\Java Project\Music_Player\Music_Player\src\assets\Aao Na (Lofi Mix).mp3
+D:\Java Project\Music_Player\Music_Player\src\assets\Abhi Mujh Mein Kahin - Lofi Flip.mp3
+D:\Java Project\Music_Player\Music_Player\src\assets\Apna Bana Le - Lofi Mix by Deepanshu Ruhela.mp3
+D:\Java Project\Music_Player\Music_Player\src\assets\Bahara - Lofi Flip.mp3
+D:\Java Project\Music_Player\Music_Player\src\assets\Bakhuda Tumhi Ho (Lofi Mix).mp3
+D:\Java Project\Music_Player\Music_Player\src\assets\Bandeya - Lofi Flip.mp3
+D:\Java Project\Music_Player\Music_Player\src\assets\Be Intehaan (Lofi Mix).mp3
+D:\Java Project\Music_Player\Music_Player\src\assets\Bheegi Si Bhaagi Si - Lofi Flip.mp3
+D:\Java Project\Music_Player\Music_Player\src\assets\Daayre - Lofi Flip.mp3
+D:\Java Project\Music_Player\Music_Player\src\assets\Darasal Lofi Mix.mp3
+D:\Java Project\Music_Player\Music_Player\src\assets\Dekha Ek Khwab - LoFi Mix.mp3
+D:\Java Project\Music_Player\Music_Player\src\assets\Dil Diyan Gallan - LoFi Mix.mp3
