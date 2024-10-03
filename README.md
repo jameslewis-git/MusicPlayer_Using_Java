@@ -13,7 +13,7 @@ A simple and functional desktop Music Player application built using Java. This 
 ## 🛠️ Technologies Used
 
 - **Java**: Core language for developing the music player functionality.
-- **JavaFX / Swing**: For building the user interface (you can mention which one you're using).
+- **Swing**: For building the user interface (you can mention which one you're using).
 - **JLayer Library**: To handle MP3 playback.
 - **Basic File I/O**: To load and manage music files.
 
